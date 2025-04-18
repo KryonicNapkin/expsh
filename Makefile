@@ -1,5 +1,5 @@
 CC		= gcc
-CFLAGS	= -std=c11 -ggdb -O2 -Wall -Wextra -Wpedantic
+CFLAGS	= -std=c11 -ggdb3 -Wall -Wextra -Wpedantic
 
 all: expsh
 
