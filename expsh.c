@@ -5,11 +5,14 @@
 #include <assert.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 #include <readline/readline.h>
+#include <readline/history.h>
 
-#define MAX_ARG_LEN 256
-#define INIT_CAP    8
+#define HIST_FILENAME ".expsh_history"
+#define MAX_ARG_LEN   256
+#define INIT_CAP      8
 
 typedef struct {
     char** args;
@@ -20,15 +23,17 @@ typedef struct {
 int parse_args(char** args, size_t count);
 
 void args_alloc(args_t* a, size_t wanted_cap);
-
 void args_append(args_t* a, const char* arg);
 void args_append_many(args_t* a, const char** args, size_t count);
 #define args_append_more(a, ...) {args_vappend((a), __VA_ARGS__, NULL)}
 void args_vappend(args_t* a, ...);
+void free_args(args_t args);
+
+int print_cmd_history(const char* filename);
 
 void args_print(args_t args);
-
 args_t get_args(char* line);
+
 char* sdup(const char* str);
 
 int main(int argc, char* argv[]) {
@@ -36,12 +41,19 @@ int main(int argc, char* argv[]) {
 
     args_t args = {0};
     const char* prompt = "$ ";
-    while (!quit && !feof(stdin)) {
+
+    read_history(HIST_FILENAME);
+
+    while (!quit) {
         char* buff = readline(prompt);
+        if (buff == NULL) return 1;
         args = get_args(buff);
-/*         args_print(args); */
+        if (args.count == 0) continue;
         quit = parse_args(args.args, args.count);
+        add_history(buff);
     }
+    write_history(HIST_FILENAME);
+    free_args(args);
     return 0;
 }
 
@@ -49,6 +61,8 @@ int parse_args(char** args, size_t count) {
     int res;
     if (!strcmp(args[0], "exit") || !strcmp(args[0], "quit")) {
         return 1;
+    } else if (!strcmp(args[0], "hist")) {
+        return print_cmd_history(HIST_FILENAME);
     }
     pid_t pid = fork();
     if (pid == -1) {
@@ -59,21 +73,24 @@ int parse_args(char** args, size_t count) {
         }
     }
     waitpid(-1, &res, 0);
-    return WEXITSTATUS(res);
+    if (WIFEXITED(res)) {
+        fprintf(stdout, "Exit status of child process was %d\n", WEXITSTATUS(res));
+    }
+    return 0;
 }
 
 args_t get_args(char* line) {
     args_t args = {0};
-    const char* delim = " \n\r\t\b\a";
+    const char* delim = " \r\t\b\a";
     char* tmp = sdup(line);
     char* token = strtok(tmp, delim);
     while (token != NULL) {
         args_append(&args, token);
         token = strtok(NULL, delim);
     }
-    args.args[args.count++] = NULL;
     free(tmp);
-
+    args_alloc(&args, 1);
+    args.args[args.count] = NULL;
     return args;
 }
 
@@ -112,6 +129,26 @@ void args_vappend(args_t* a, ...) {
         memcpy(a->args[a->count++], arg, strlen(arg) + 1);
     }
     va_end(ap);
+}
+
+void free_args(args_t args) {
+    for (int i = 0; i < args.count; ++i) {
+        free(args.args[i]);
+    }
+    free(args.args);
+}
+
+int print_cmd_history(const char* filename) {
+    FILE* hist_file = fopen(filename, "r");
+    if (hist_file == NULL) {
+        fprintf(stderr, "Cannot open file '%s': %s!\n", filename, strerror(errno));
+        return 1;
+    }
+    char line[1024];
+    while (fgets(line, sizeof(line), hist_file) != NULL) {
+        fprintf(stdout, "%s", line);
+    }
+    return 0;
 }
 
 void args_print(args_t args) {
